@@ -240,3 +240,116 @@ All detects and rewrites are completely AUTOMATICALLY
 @arnofeng [ngx_google_deployment](https://github.com/arnofeng/ngx_google_deployment)  
 @imlinhanchao [ngx_proxy_wiki](https://github.com/imlinhanchao/ngx_proxy_wiki)  
 @joymufeng [play-google](https://github.com/joymufeng/play-google)  
+
+# 一键安装脚本失败， 手动安装zmirror google， 并设置问题
+1. #### 安装初始化环境
+```bash
+sudo cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime &&
+sudo apt-get update &&
+sudo apt-get upgrade -y &&
+sudo apt-get dist-upgrade -y &&
+sudo apt-get install build-essential patch binutils make devscripts nano libtool libssl-dev libxml2 libxml2-dev software-properties-common python-software-properties dnsutils git wget curl python3 python3-pip iftop -y &&
+sudo python3 -m pip install -U flask requests cchardet fastcache
+```
+2. #### 安装apache2
+```bash
+LC_ALL=C.UTF-8 sudo add-apt-repository -y ppa:ondrej/apache2 &&
+sudo apt-key update &&
+sudo apt-get update &&
+sudo apt-get upgrade -y &&
+sudo apt-get install apache2 -y &&
+sudo a2enmod rewrite mime include headers filter expires deflate autoindex setenvif ssl http2 &&
+sudo apt-get install libapache2-mod-wsgi-py3 -y
+```
+
+3. #### 安装zmirror google， 并设置问题
+```bash
+cd /var/www &&
+git clone https://github.com/aploium/zmirror &&
+cd zmirror &&
+chown -R www-data . && 
+chgrp -R www-data . &&
+cp more_configs/config_google_and_zhwikipedia.py config.py
+```
+
+手动修改 `config.py`, 在里面加上自己的域名
+```bash
+ sed -i '31 s/127.0.0.1/x.y.com/' config.py
+ sed -i '32 s/http/https/' config.py
+ sed -i '32 a verbose_level = 2' config.py
+```
+设置问题
+```bash
+cat << EOF >> config.py
+#设置问题
+human_ip_verification_enabled = True
+# salt, please CHANGE it
+human_ip_verification_answers_hash_str = 'Aml52oICovuYm8JTfTRgyjx7SzoWAdPn'
+# change to your own question
+human_ip_verification_questions = [
+  'question', 'answer'
+]
+human_ip_verification_identity_record = []
+EOF
+```
+
+4. #### 配置Apache2， 修改域名和证书路径
+```bash
+cd /etc/apache2/conf-enabled &&
+wget https://gist.githubusercontent.com/aploium/8cd86ebf07c275367dd62762cc4e815a/raw/29a6c7531c59590c307f503b186493e559c7d790/h5.conf
+cd /etc/apache2/sites-enabled
+cat > my-first-mirror-site.conf <<EOF
+<IfModule mod_ssl.c>
+    SSLCipherSuite HIGH:MEDIUM:!aNULL:!MD5
+    <VirtualHost *:443>
+        # 域名, 记得修改成你自己的
+        ServerName x.x.com
+        
+        # 这个没用的
+        ServerAdmin root@localhost
+        
+        
+        
+        # 下面两个log文件路径也建议按实际修改
+        # 默认保存在 /var/log/apache2/ 文件夹下
+        # ErrorLog 中包含了zmirror产生的stdout输出, 若需要debug可以看它
+        ErrorLog ${APACHE_LOG_DIR}/zmirror-google_ssl_error.log
+        CustomLog ${APACHE_LOG_DIR}/zmirror-google_ssl_access.log combined
+
+        # ##### WSGI 这部分是重点  ######
+        WSGIDaemonProcess zmirror_google user=www-data group=www-data threads=16
+        #这是刚刚安装的zmirror的路径
+        WSGIScriptAlias / /var/www/zmirror/wsgi.py
+        WSGIPassAuthorization On
+
+        # 给予zmirror文件夹权限
+        <Directory /var/www/zmirror>
+            WSGIProcessGroup zmirror_google
+            WSGIApplicationGroup %{GLOBAL}
+            Order deny,allow
+            Allow from all
+        </Directory>
+
+       # ######### SSL部分 这部分告诉Apache你的证书和私钥在哪 #########
+       # 下面使用的是刚刚let's encrypt给我们的证书, 你也可以用别的
+        SSLEngine on
+        # 私钥
+        SSLCertificateFile /yourpath/cert.pem
+        # 证书
+        SSLCertificateKeyFile /yourpath/privkey.pem
+        # 证书链 TODO
+        SSLCertificateChainFile /yourpath/chain.pem
+       
+       # HTTP/2
+        <IfModule http2_module>
+            Protocols h2 h2c http/1.1
+        </IfModule>
+    </VirtualHost>
+</IfModule>
+EOF
+```
+
+5. #### 完成
+```bash
+sudo service apache2 restart
+```
